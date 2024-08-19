@@ -26,6 +26,17 @@ describe("amm", () => {
   let initializerAtaX: web3.PublicKey;
   let initializerAtaY: web3.PublicKey;
 
+  let mintLp: web3.PublicKey;
+  let mintLpBump: number;
+
+  let config: web3.PublicKey;
+  let configBump: number;
+
+  let vaultX: web3.PublicKey;
+  let vaultY: web3.PublicKey;
+
+  let seed = generateRandomU64Seed();
+
   before("Airdrop and Initialize Mints / ATAs", async () => {
     await anchor
       .getProvider()
@@ -37,12 +48,12 @@ describe("amm", () => {
     // Create two mints.
     const { mint: mintX_, ata: ataX_ } = await createAndMint(
       provider,
-      100,
+      1000,
       initializer.publicKey
     );
     const { mint: mintY_, ata: ataY_ } = await createAndMint(
       provider,
-      10,
+      100,
       initializer.publicKey
     );
 
@@ -53,10 +64,9 @@ describe("amm", () => {
   });
 
   it("Is initialized!", async () => {
-    const seed = generateRandomU64Seed();
     const fee = 100; // 1% in basis points
 
-    const [config, configBump] = web3.PublicKey.findProgramAddressSync(
+    const [config_, configBump_] = web3.PublicKey.findProgramAddressSync(
       [
         anchor.utils.bytes.utf8.encode("amm"),
         mintX.toBuffer(),
@@ -66,13 +76,24 @@ describe("amm", () => {
       program.programId
     );
 
-    const [mintLp, mintLpBump] = web3.PublicKey.findProgramAddressSync(
-      [anchor.utils.bytes.utf8.encode("mint"), config.toBuffer()],
+    const [mintLp_, mintLpBump_] = web3.PublicKey.findProgramAddressSync(
+      [anchor.utils.bytes.utf8.encode("mint"), config_.toBuffer()],
       program.programId
     );
 
-    let vaultX = getAssociatedTokenAddressSync(mintX, config, true);
-    let vaultY = getAssociatedTokenAddressSync(mintY, config, true);
+    mintLp = mintLp_;
+    mintLpBump = mintLpBump_;
+    config = config_;
+    configBump = configBump_;
+
+    // console.log("config:", config.toBase58());
+    // console.log("mintLp:", mintLp.toBase58());
+
+    vaultX = getAssociatedTokenAddressSync(mintX, config, true);
+    vaultY = getAssociatedTokenAddressSync(mintY, config, true);
+
+    // console.log("vaultX:", vaultX.toBase58());
+    // console.log("vaultY:", vaultY.toBase58());
 
     const accounts = {
       signer: initializer.publicKey,
@@ -102,5 +123,49 @@ describe("amm", () => {
     expect(configAccount.lpBump).to.eql(mintLpBump);
 
     console.log("Your transaction signature", tx);
+  });
+
+  it("deposit", async () => {
+    const amountX = 100;
+    const amountY = 10;
+
+    const makerLpAta = getAssociatedTokenAddressSync(
+      mintLp,
+      initializer.publicKey,
+      true
+    );
+
+    const accounts = {
+      maker: initializer.publicKey,
+      mintX,
+      mintY,
+      makerAtaX: initializerAtaX,
+      makerAtaY: initializerAtaY,
+      mintLp,
+      vaultX,
+      vaultY,
+      makerLpAta,
+      config, // config account
+      tokenProgram: TOKEN_PROGRAM_ID,
+    };
+
+    try {
+      const tx = await program.methods
+        .deposit(
+          new anchor.BN(amountX),
+          new anchor.BN(amountY),
+          new anchor.BN(amountX + 1),
+          new anchor.BN(amountY + 1)
+        )
+        .signers([initializer])
+        .accounts(accounts)
+        .rpc();
+
+      console.log("Your transaction signature", tx);
+    } catch (e) {
+      if (e instanceof web3.SendTransactionError) {
+        console.log(e);
+      }
+    }
   });
 });

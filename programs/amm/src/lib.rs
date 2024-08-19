@@ -18,11 +18,16 @@ pub mod amm {
     }
 
     // Deposit liquidity into the pool to mint LP tokens
-    pub fn deposit(ctx: Context<Deposit>, amount: u64, max_x: u64, max_y: u64) -> Result<()> {
-        // deposit_token_x
-        // deposit_token_y
-        // mint_lp_tokens(amount)
-        Ok(())
+    pub fn deposit(
+        ctx: Context<Deposit>,
+        amount_x: u64,
+        amount_y: u64,
+        max_x: u64,
+        max_y: u64,
+    ) -> Result<()> {
+        ctx.accounts.deposit(amount_x, true, max_x)?;
+        ctx.accounts.deposit(amount_y, true, max_y)?;
+        ctx.accounts.mint_lp_tokens(amount_x, amount_y)
     }
 
     // Burn LP tokens to withdraw liquidity
