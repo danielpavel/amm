@@ -71,7 +71,44 @@ pub struct Deposit<'info> {
 }
 
 impl<'info> Deposit<'info> {
-    pub fn deposit(&mut self, amount: u64, is_x: bool, max_amount: u64) -> Result<()> {
+    pub fn deposit(&mut self, max_x: u64, max_y: u64) -> Result<()> {
+
+        let lp_supply = self.mint_lp.supply;
+        let amount_vault_x = self.vault_x.amount;
+        let amount_vault_y = self.vault_y.amount;
+
+        let (amount_x, amount_y) = match lp_supply == 0 && amount_vault_x == 0 && amount_vault_y == 0 {
+            true => (max_x, max_y),
+            false => {
+                let max_lp_amount = max_x
+                    .checked_mul(max_y)
+                    .ok_or(ProgramError::ArithmeticOverflow)?;
+                let ratio = lp_supply
+                    .checked_add(max_lp_amount).ok_or(ProgramError::ArithmeticOverflow)?
+                    .checked_div(lp_supply).ok_or(ProgramError::ArithmeticOverflow)?;
+
+                let amount_x = max_x
+                    .checked_mul(ratio)
+                    .ok_or(ProgramError::ArithmeticOverflow)?
+                    .checked_sub(max_x)
+                    .ok_or(ProgramError::ArithmeticOverflow)?;
+                let amount_y = max_y
+                    .checked_mul(ratio)
+                    .ok_or(ProgramError::ArithmeticOverflow)?
+                    .checked_sub(max_y)
+                    .ok_or(ProgramError::ArithmeticOverflow)?;
+
+                (amount_x, amount_y)
+            }
+        };
+
+        self.deposit_tokens(amount_x, true)?;
+        self.deposit_tokens(amount_y, false)?;
+
+        self.mint_lp_tokens(amount_x, amount_y)
+    }
+
+    fn deposit_tokens(&mut self, amount: u64, is_x: bool) -> Result<()> {
         let (from, to, mint) = match is_x {
             true => (
                 self.maker_ata_x.to_account_info(),
