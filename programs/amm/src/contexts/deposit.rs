@@ -51,7 +51,7 @@ pub struct Deposit<'info> {
     vault_y: Box<InterfaceAccount<'info, TokenAccount>>,
 
     #[account(
-        init, 
+        init_if_needed,
         payer = maker,
         associated_token::mint = mint_lp,
         associated_token::authority = maker,
@@ -72,35 +72,37 @@ pub struct Deposit<'info> {
 
 impl<'info> Deposit<'info> {
     pub fn deposit(&mut self, max_x: u64, max_y: u64) -> Result<()> {
-
         let lp_supply = self.mint_lp.supply;
         let amount_vault_x = self.vault_x.amount;
         let amount_vault_y = self.vault_y.amount;
 
-        let (amount_x, amount_y) = match lp_supply == 0 && amount_vault_x == 0 && amount_vault_y == 0 {
-            true => (max_x, max_y),
-            false => {
-                let max_lp_amount = max_x
-                    .checked_mul(max_y)
-                    .ok_or(ProgramError::ArithmeticOverflow)?;
-                let ratio = lp_supply
-                    .checked_add(max_lp_amount).ok_or(ProgramError::ArithmeticOverflow)?
-                    .checked_div(lp_supply).ok_or(ProgramError::ArithmeticOverflow)?;
+        let (amount_x, amount_y) =
+            match lp_supply == 0 && amount_vault_x == 0 && amount_vault_y == 0 {
+                true => (max_x, max_y),
+                false => {
+                    let ratio = amount_vault_x
+                        .checked_div(amount_vault_y)
+                        .ok_or(ProgramError::ArithmeticOverflow)?;
 
-                let amount_x = max_x
-                    .checked_mul(ratio)
-                    .ok_or(ProgramError::ArithmeticOverflow)?
-                    .checked_sub(max_x)
-                    .ok_or(ProgramError::ArithmeticOverflow)?;
-                let amount_y = max_y
-                    .checked_mul(ratio)
-                    .ok_or(ProgramError::ArithmeticOverflow)?
-                    .checked_sub(max_y)
-                    .ok_or(ProgramError::ArithmeticOverflow)?;
+                    let dx = max_x;
+                    let dy = dx
+                        .checked_div(ratio)
+                        .ok_or(ProgramError::ArithmeticOverflow)?;
 
-                (amount_x, amount_y)
-            }
-        };
+                    let (amount_x, amount_y) = match dy <= max_y {
+                        true => (dx, dy),
+                        false => {
+                            let dy = max_y;
+                            let dx = dy
+                                .checked_div(ratio)
+                                .ok_or(ProgramError::ArithmeticOverflow)?;
+                            (dx, dy)
+                        }
+                    };
+
+                    (amount_x, amount_y)
+                }
+            };
 
         self.deposit_tokens(amount_x, true)?;
         self.deposit_tokens(amount_y, false)?;

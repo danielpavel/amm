@@ -37,6 +37,8 @@ describe("amm", () => {
 
   let seed = generateRandomU64Seed();
 
+  let decimals = 6;
+
   before("Airdrop and Initialize Mints / ATAs", async () => {
     await anchor
       .getProvider()
@@ -48,12 +50,12 @@ describe("amm", () => {
     // Create two mints.
     const { mint: mintX_, ata: ataX_ } = await createAndMint(
       provider,
-      1000,
+      10000,
       initializer.publicKey
     );
     const { mint: mintY_, ata: ataY_ } = await createAndMint(
       provider,
-      100,
+      1000,
       initializer.publicKey
     );
 
@@ -126,8 +128,8 @@ describe("amm", () => {
   });
 
   it("deposit", async () => {
-    const amountX = 100;
-    const amountY = 10;
+    const amountX = 100 * 10 ** decimals;
+    const amountY = 10 * 10 ** decimals;
 
     const makerLpAta = getAssociatedTokenAddressSync(
       mintLp,
@@ -149,14 +151,26 @@ describe("amm", () => {
       tokenProgram: TOKEN_PROGRAM_ID,
     };
 
+    // Get initial balances
+    let initialMakerAtaXAmount = await connection.getTokenAccountBalance(
+      initializerAtaX
+    );
+    let initialMakerAtaYAmount = await connection.getTokenAccountBalance(
+      initializerAtaY
+    );
+
+    // console.log(
+    //   "initialMakerAtaXAmount",
+    //   initialMakerAtaXAmount.value.uiAmount
+    // );
+    // console.log(
+    //   "initialMakerAtaYAmount",
+    //   initialMakerAtaYAmount.value.uiAmount
+    // );
+
     try {
       const tx = await program.methods
-        .deposit(
-          new anchor.BN(amountX),
-          new anchor.BN(amountY),
-          new anchor.BN(amountX + 1),
-          new anchor.BN(amountY + 1)
-        )
+        .deposit(new anchor.BN(amountX), new anchor.BN(amountY))
         .signers([initializer])
         .accounts(accounts)
         .rpc();
@@ -167,5 +181,98 @@ describe("amm", () => {
         console.log(e);
       }
     }
+
+    const vaultXBalance = await connection.getTokenAccountBalance(vaultX);
+    const vaultYBalance = await connection.getTokenAccountBalance(vaultY);
+
+    // console.log("vaultXBalance", vaultXBalance.value.uiAmount);
+    // console.log("vaultYBalance", vaultYBalance.value.uiAmount);
+
+    // It's initial deposit so check that amount deposited is the amount in the vaults
+    expect(vaultXBalance.value.amount).to.eql(amountX.toString());
+    expect(vaultYBalance.value.amount).to.eql(amountY.toString());
+
+    // check amounts have been debited from the maker's accounts
+    const makerAtaXAmount = await connection.getTokenAccountBalance(
+      initializerAtaX
+    );
+    const makerAtaYAmount = await connection.getTokenAccountBalance(
+      initializerAtaY
+    );
+
+    // console.log("makerAtaXBalance", makerAtaXAmount.value.uiAmount);
+    // console.log("makerAtaYBalance", makerAtaYAmount.value.uiAmount);
+
+    expect(Number(makerAtaXAmount.value.amount)).eq(
+      Number(initialMakerAtaXAmount.value.amount) - amountX
+    );
+    expect(Number(makerAtaYAmount.value.amount)).eq(
+      Number(initialMakerAtaYAmount.value.amount) - amountY
+    );
+
+    // check amount of LP tokens
+    const makerLpAmount = await connection.getTokenAccountBalance(makerLpAta);
+    const makerLpAmountBN = new anchor.BN(makerLpAmount.value.amount);
+    const expectedLpAmountBN = new anchor.BN(amountY * amountX);
+
+    expect(makerLpAmountBN).to.deep.eq(expectedLpAmountBN);
+  });
+
+  it("deposit again - keep ratio", async () => {
+    const amountX = 50 * 10 ** decimals;
+    const amountY = 60 * 10 ** decimals;
+
+    const makerLpAta = getAssociatedTokenAddressSync(
+      mintLp,
+      initializer.publicKey,
+      true
+    );
+
+    const accounts = {
+      maker: initializer.publicKey,
+      mintX,
+      mintY,
+      makerAtaX: initializerAtaX,
+      makerAtaY: initializerAtaY,
+      mintLp,
+      vaultX,
+      vaultY,
+      makerLpAta,
+      config, // config account
+      tokenProgram: TOKEN_PROGRAM_ID,
+    };
+
+    // Get initial balances
+    const initialVaultXAmount = await connection.getTokenAccountBalance(vaultX);
+    const initialVaultYAmount = await connection.getTokenAccountBalance(vaultY);
+
+    const ratio =
+      initialVaultXAmount.value.uiAmount / initialVaultYAmount.value.uiAmount;
+
+    try {
+      const tx = await program.methods
+        .deposit(new anchor.BN(amountX), new anchor.BN(amountY))
+        .signers([initializer])
+        .accounts(accounts)
+        .rpc();
+
+      console.log("Your transaction signature", tx);
+    } catch (e) {
+      if (e instanceof web3.SendTransactionError) {
+        console.log(e);
+      }
+    }
+
+    const vaultXBalance = await connection.getTokenAccountBalance(vaultX);
+    const vaultYBalance = await connection.getTokenAccountBalance(vaultY);
+
+    // console.log("VaultXBalance:", vaultXBalance.value.uiAmount);
+    // console.log("VaultYBalance:", vaultYBalance.value.uiAmount);
+
+    // Check vault balances have increased and kept the ratio
+    const newRatio =
+      vaultXBalance.value.uiAmount / vaultYBalance.value.uiAmount;
+
+    expect(newRatio).to.eql(ratio);
   });
 });
